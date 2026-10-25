@@ -1,0 +1,6 @@
+{
+  "name": "limit-pace",
+  "description": "limit-pace: what 1% of your weekly Claude limit is worth, and whether it lasts until the reset",
+  "owner": { "name": "nnenoix" },
+  "plugins": [{ "name": "limit-pace", "source": "./" }]
+}

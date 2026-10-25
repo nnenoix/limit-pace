@@ -1,0 +1,8 @@
+{
+  "name": "limit-pace",
+  "version": "1.0.0",
+  "description": "Shows what 1% of your weekly Claude limit is worth in API dollars, how sure that estimate is, and whether the limit lasts until the reset at your current pace.",
+  "author": { "name": "nnenoix" },
+  "license": "MIT",
+  "keywords": ["usage", "limits", "rate-limit", "subscription", "pace"]
+}
