@@ -20,9 +20,16 @@ const PRICES: [RegExp, number[]][] = [
   [/haiku/, [0.1, 0.5, 0.2, 0.01]],
 ]
 
-export type Cost = { usd: number; $in: number; $out: number; $cw: number; $cr: number; cr: number; cw: number; out: number; calls: number }
+const FAMILIES = ['fable', 'opus', 'sonnet', 'haiku'] as const
+export const family = (model: string) => FAMILIES.find(f => model.includes(f)) ?? 'other'
+const title = (f: string) => f.charAt(0).toUpperCase() + f.slice(1)
 
-export const zero = (): Cost => ({ usd: 0, $in: 0, $out: 0, $cw: 0, $cr: 0, cr: 0, cw: 0, out: 0, calls: 0 })
+export type Cost = {
+  usd: number; $in: number; $out: number; $cw: number; $cr: number; cr: number; cw: number; out: number; calls: number
+  byFamily: Record<string, number>
+}
+
+export const zero = (): Cost => ({ usd: 0, $in: 0, $out: 0, $cw: 0, $cr: 0, cr: 0, cw: 0, out: 0, calls: 0, byFamily: {} })
 
 export function price(model: string, context: number): number[] {
   const p = (PRICES.find(([re]) => re.test(model)) ?? PRICES[2]!)[1]
@@ -33,12 +40,22 @@ export function add(c: Cost, r: Row): Cost {
   const [, model, i, o, cw, cr] = r
   const [pi = 0, po = 0, pw = 0, pr = 0] = price(model, i + cw + cr)
   const $in = (i * pi) / 1e6, $out = (o * po) / 1e6, $cw = (cw * pw) / 1e6, $cr = (cr * pr) / 1e6
-  c.$in += $in; c.$out += $out; c.$cw += $cw; c.$cr += $cr; c.usd += $in + $out + $cw + $cr
+  const usd = $in + $out + $cw + $cr
+  c.$in += $in; c.$out += $out; c.$cw += $cw; c.$cr += $cr; c.usd += usd
   c.cr += cr; c.cw += cw; c.out += o; c.calls++
+  const f = family(model)
+  c.byFamily[f] = (c.byFamily[f] ?? 0) + usd
   return c
 }
 
-export type Step = { a: number; b: number; t0: number; t1: number; cost: Cost; clean: boolean }
+// The family that took at least 90% of a step's dollars, else null. The limit charges model families
+// differently per API dollar, so only a one-family step measures the price of 1% for that family.
+export function dominant(c: Cost): string | null {
+  for (const [f, usd] of Object.entries(c.byFamily)) if (c.usd > 0 && usd / c.usd >= 0.9) return f
+  return null
+}
+
+export type Step = { a: number; b: number; t0: number; t1: number; cost: Cost; family: string | null; clean: boolean }
 
 // The weekly percent's steps: a call belongs to the step that the next higher reading closes.
 // A step a→b runs from the call that last read a to the call that first read b.
@@ -49,7 +66,8 @@ export function steps(rows: Row[], from: number, to: number): Step[] {
     if (r[0] < from || r[0] >= to) continue
     const now = r[6] == null ? null : Math.floor(r[6])
     if (w != null && now != null && now > w) {
-      out.push({ a: w, b: now, t0, t1: r[0], cost, clean: now - w === 1 })
+      const fam = dominant(cost)
+      out.push({ a: w, b: now, t0, t1: r[0], cost, family: fam, clean: now - w === 1 && fam != null })
       cost = zero(); t0 = r[0]
     }
     if (now != null && (w == null || now > w)) w = now
@@ -60,10 +78,10 @@ export function steps(rows: Row[], from: number, to: number): Step[] {
 
 export type Span = { k: number; a: number; b: number; t0: number; t1: number; perPct: number; stat: number; diff: number | null; verdict: string }
 
-// Price of 1% over the last k steps in a row. Two exact boundaries make the sum exact; the meter
-// books usage in bursts, so one step is off by about ±40% of a step's price and a k-step average
-// by about ±40%/k. Another ±10% is systematic: API dollars are our ruler, the meter may weigh token
-// kinds otherwise.
+// Price of 1% over the last k clean steps. Each step's two boundaries are exact, so its sum is exact;
+// the meter books usage in bursts, so one step is off by about ±40% of a step's price and a k-step
+// average by about ±40%/k. Another ±10% is systematic: API dollars are our ruler, the meter may weigh
+// token kinds otherwise.
 export function spans(list: Step[], norm: number | null): Span[] {
   const out: Span[] = []
   for (const k of [1, 3, 5, 10]) {
@@ -89,6 +107,13 @@ const pct = (x: number | null) => x == null ? '—' : (x >= 0 ? '+' : '') + (x *
 const when = (t: number) => new Date(t).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 const clock = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 
+// a step's model mix when it is not all one family: "Sonnet 88%"
+function mix(x: Step, main: string | null) {
+  if (x.family === main) return ''
+  const [f, usd] = Object.entries(x.cost.byFamily).sort((p, q) => q[1] - p[1]).find(([g]) => g !== main) ?? ['other', 0]
+  return ` (${title(f)} ${((usd / (x.cost.usd || 1)) * 100).toFixed(0)}%)`
+}
+
 export type Report = { short: string; full: string; status: string }
 
 export function report(rows: Row[], lim: Limits, now: number): Report {
@@ -96,55 +121,69 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
   const reset = lim.weekResetsAt ?? now + WEEK
   const ws = reset - WEEK
   const cur = steps(rows, ws, reset)
-  const prev = [...steps(rows, ws - 2 * WEEK, ws - WEEK), ...steps(rows, ws - WEEK, ws)].filter(s => s.clean)
+  const before = [...steps(rows, ws - 2 * WEEK, ws - WEEK), ...steps(rows, ws - WEEK, ws)].filter(s => s.clean)
+
+  // the family most clean steps measure lately: its price is the one shown
+  const recent = [...before, ...cur.filter(s => s.clean)].slice(-10)
+  const counts = new Map<string, number>()
+  for (const s of recent) if (s.family) counts.set(s.family, (counts.get(s.family) ?? 0) + 1)
+  const main = [...counts].sort((p, q) => q[1] - p[1])[0]?.[0] ?? null
+  const good = cur.filter(s => s.clean && s.family === main)
+  const prev = before.filter(s => s.family === main)
   const norm = prev.length >= 5 ? prev.reduce((s, x) => s + x.cost.usd, 0) / prev.length : null
-  const sp = spans(cur, norm)
+  const sp = spans(good, norm)
   const fresh = sp.find(s => s.k === 5) ?? sp.find(s => s.k === 3) ?? sp.find(s => s.k === 10)
   const perPct = fresh?.perPct ?? norm
 
-  const w = lim.week ?? rows[rows.length - 1]?.[6] ?? 0
-  const tickAt = cur[cur.length - 1]?.t1 ?? ws
-  const since = zero(), week = zero(), h6 = zero(), fh = zero()
+  // the weekly percent as a whole number: a percent just begun says nothing yet
+  const w = Math.floor(lim.week ?? rows[rows.length - 1]?.[6] ?? 0)
+  const week = zero(), fh = zero()
   const fhStart = lim.fiveHourResetsAt ? lim.fiveHourResetsAt - 5 * HOUR : now
   for (const r of rows) {
-    if (r[0] >= tickAt && r[0] <= now) add(since, r)
     if (r[0] >= ws && r[0] <= now) add(week, r)
-    if (r[0] >= now - 6 * HOUR && r[0] <= now) add(h6, r)
     if (r[0] >= fhStart && r[0] <= now) add(fh, r)
   }
-  const est = perPct ? Math.floor(w) + Math.min(0.99, since.usd / perPct) : w
-  const left = perPct ? (100 - est) * perPct : null
-  const pace = h6.usd / 6
+  const left = perPct ? (100 - w) * perPct : null
   const resetIn = (reset - now) / HOUR
 
+  // pace: how far the meter itself moved over the last day, breaks and sleep included
+  const dayFrom = Math.max(ws, now - 24 * HOUR)
+  let wDay = 0
+  for (const r of rows) { if (r[0] < ws || r[6] == null) continue; if (r[0] > dayFrom) break; wDay = Math.floor(r[6]) }
+  const hrsDay = (now - dayFrom) / HOUR, perHour = hrsDay > 1 ? (w - wDay) / hrsDay : 0
+  const span = hrsDay >= 23.5 ? 'over the last day' : `over ${hrsDay.toFixed(0)} h since the reset`
+
   const S: string[] = ['| | |', '|---|---|']
-  let status = `week ${Math.floor(w)}%`
-  if (pace > 0 && left != null && perPct) {
-    const hrs = left / pace, rate = pace / perPct
+  let status = `week ${w}%`
+  if (perHour > 0) {
+    const hrs = (100 - w) / perHour
     S.push(hrs >= resetIn
-      ? `| **At this pace** | **enough**: ${rate.toFixed(2)}%/h (${money(pace)}/h), 100% would take ${hrs.toFixed(0)} h, reset in ${resetIn.toFixed(0)} h |`
-      : `| **At this pace** | **runs out**: ${rate.toFixed(2)}%/h (${money(pace)}/h), 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before reset |`)
+      ? `| **At this pace** | **enough**: +${w - wDay}% ${span} (${perHour.toFixed(2)}%/h), 100% would take ${hrs.toFixed(0)} h, reset in ${resetIn.toFixed(0)} h |`
+      : `| **At this pace** | **runs out**: +${w - wDay}% ${span} (${perHour.toFixed(2)}%/h), 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before reset |`)
     status += hrs >= resetIn ? ' · enough to reset' : ` · out ${when(now + hrs * HOUR)}`
   }
-  S.push(`| Week | **${Math.floor(w)}%** (≈${est.toFixed(1)}) · resets ${when(reset)}, in ${resetIn.toFixed(0)} h |`)
-  if (fresh) S.push(`| 1% of the week now | **${money(fresh.perPct)}** (last ${fresh.k}) · ${pct(fresh.diff)} vs your earlier weeks (${money(norm)}) · ${fresh.verdict} |`)
-  else S.push(`| 1% of the week now | not enough steps yet${norm ? `; earlier weeks ${money(norm)}` : ''} |`)
-  S.push(`| Last percents | ${cur.slice(-3).map(x => `${x.a}→${x.b} ${money(x.cost.usd)}`).join(' · ') || '—'} |`)
-  S.push(`| Current ${Math.floor(w)}→${Math.floor(w) + 1} | ${money(since.usd)} over ${((now - tickAt) / 60e3).toFixed(0)} min |`)
+  S.push(`| Week | **${w}%** · resets ${when(reset)}, in ${resetIn.toFixed(0)} h |`)
+  const of = main ? ` (${title(main)})` : ''
+  if (fresh) S.push(`| 1% of the week${of} | **${money(fresh.perPct)}** (last ${fresh.k} clean) · ${pct(fresh.diff)} vs your earlier weeks (${money(norm)}) · ${fresh.verdict} |`)
+  else S.push(`| 1% of the week${of} | not enough clean percents yet${norm ? `; earlier weeks ${money(norm)}` : ''} |`)
+  S.push(`| Last percents | ${cur.slice(-3).map(x => `${x.a}→${x.b} ${money(x.cost.usd)}${mix(x, main)}`).join(' · ') || '—'} |`)
   if (lim.fiveHour != null) S.push(`| 5-hour window | ${lim.fiveHour}%${lim.fiveHour ? ` · ${money(fh.usd / lim.fiveHour)} per 1%` : ''}${lim.fiveHourResetsAt ? ` · resets ${clock(lim.fiveHourResetsAt)}` : ''} |`)
-  S.push(`| Spent / left | ${money(week.usd)} this week · ≈${money(left)} left at ${money(perPct)} per 1% |`)
+  S.push(`| Spent / left | ${money(week.usd)} this week · ≈${money(left)} left at ${money(perPct)} per 1%${of} |`)
   if (fresh) status += ` · ${money(fresh.perPct)}/1%`
 
   const F: string[] = [...S, '', '## Every percent this week', '',
-    '| Step | Closed | Took | $ | Cache read | Cache write | Output | Calls |', '|---|---|---|---|---|---|---|---|']
+    '| Step | Closed | Took | $ | Cache read | Cache write | Output | Calls | |', '|---|---|---|---|---|---|---|---|---|']
   for (const x of cur) {
     const c = x.cost
-    F.push(`| ${x.a}→${x.b}${x.clean ? '' : ' (jump)'} | ${clock(x.t1)} | ${((x.t1 - x.t0) / 60e3).toFixed(0)} min | ${money(c.usd)} | ${mt(c.cr)} · ${money(c.$cr)} | ${mt(c.cw)} · ${money(c.$cw)} | ${mt(c.out)} · ${money(c.$out)} | ${c.calls} |`)
+    const note = x.b - x.a > 1 ? `jumped ${x.b - x.a}%` : x.family == null ? `mixed:${mix(x, null)}` : x.family !== main ? `${title(x.family)} only` : ''
+    F.push(`| ${x.a}→${x.b} | ${clock(x.t1)} | ${((x.t1 - x.t0) / 60e3).toFixed(0)} min | ${money(c.usd)} | ${mt(c.cr)} · ${money(c.$cr)} | ${mt(c.cw)} · ${money(c.$cw)} | ${mt(c.out)} · ${money(c.$out)} | ${c.calls} | ${note} |`)
   }
-  F.push('', '## Accuracy', '', `| Last | Span | $ per 1% | Error | vs earlier weeks | Verdict |`, '|---|---|---|---|---|---|')
+  F.push('', '## Accuracy', '', `| Last clean | Span | $ per 1% | Error | vs earlier weeks | Verdict |`, '|---|---|---|---|---|---|')
   for (const s of sp) F.push(`| ${s.k} | ${s.a}→${s.b}%, ${when(s.t0)} – ${when(s.t1)} | ${money(s.perPct)} | ±${money(s.stat)} and ±10% | ${pct(s.diff)} | ${s.verdict} |`)
   F.push('',
+    `Clean percents only: exactly +1%, at least 90% of the dollars on one model family${main ? ` (${title(main)} here)` : ''}. The limit charges families differently per API dollar, so a step mixing Opus and Sonnet measures neither.`,
     '"Clearly" means the gap is bigger than the error: ±40%/k from the meter booking usage in bursts, plus ±10% because API dollars are only our ruler (about 18% at k=5, 14% at k=10).',
+    'The pace is how far the weekly percent itself moved over the last day, so breaks and sleep count; a percent just begun is not counted.',
     'Dollars count only the Claude Code sessions on this computer where limit-pace runs. Other computers, claude.ai chats, Cowork and Claude Code on the web move the percent but not these dollars: if they were busy, 1% looks cheaper here than it is.',
     'Prices are public API list prices per million tokens; cache writes at the one-hour rate for Opus, Fable and Haiku, five-minute rate for Sonnet.')
   return { short: S.join('\n'), full: F.join('\n'), status }
