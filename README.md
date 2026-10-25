@@ -6,6 +6,7 @@ Claude subscriptions show your five-hour and weekly limits only as percents. lim
 
 - **Your pace.** How far the weekly percent moved over the last day, breaks and sleep included, and whether the limit lasts until the reset at that pace, or the hour it would run out.
 - **The price of 1%.** What one percent of the week currently buys in API dollars of the model you mostly use, compared with your own earlier weeks. A sudden change means you get more or less for the same subscription.
+- **The price for every model.** Opus, Sonnet, Haiku and Fable each get their own price of 1%, fitted from all steps, mixed ones included, and how many times more limit an API dollar of each takes than one of your main model.
 - **An honest error bar.** Every estimate comes with its error and a verdict: *clearly above*, *clearly below* or *within noise*. A single percent is never treated as proof.
 - **Every percent of the week.** What each step cost, split into cache reads, cache writes and output.
 
@@ -14,7 +15,7 @@ Claude subscriptions show your five-hour and weekly limits only as percents. lim
 | Command | Shows |
 |---|---|
 | `/limit-pace` | The short table: pace, week, price of 1% now, the last percents, the five-hour window, spent and left |
-| `/limit-pace-full` | The short table, every percent of this week, and the accuracy table |
+| `/limit-pace-full` | The short table, every percent of this week, the price of 1% for each model against earlier weeks, and the accuracy table |
 
 The status line also shows `week 21% · enough to reset · $29.73/1%`, updated after each turn.
 
@@ -26,6 +27,7 @@ Example of `/limit-pace`:
 | Week | **24%** · resets Sat 31 Oct, 03:00, in 123 h |
 | 1% of the week (Opus) | **$31.02** (last 5 clean) · +27% vs your earlier weeks ($24.50) · clearly above |
 | Last percents | 21→22 $29.85 · 22→23 $24.33 (Sonnet 58%) · 23→24 $17.24 (Sonnet 88%) |
+| 1% by model (whole week) | Opus $27.12 ±15% · Sonnet $18.85 ±49% (a dollar costs ×1.4 of Opus's) |
 | 5-hour window | 8% · $5.61 per 1% · resets 04:49 |
 | Spent / left | $529 this week · ≈$2357 left at $31.02 per 1% (Opus) |
 
@@ -41,7 +43,7 @@ Nothing to configure. Works on Windows, macOS and Linux with a Claude Pro or Max
 
 - After each model request, subagents' included, the plugin stores one row: time, model, input, output, cache write and cache read tokens, and the five-hour and weekly percents that response reported. Rows are kept for 16 days in the plugin's own storage on your computer. Nothing is sent anywhere, and no prompt or response text is stored.
 - A step of the weekly percent, say 20→21, holds the calls made between the response that last read 20% and the one that first read 21%. Its price is the API value of those calls.
-- The limit charges model families differently per API dollar: in one measurement a percent of mostly Sonnet subagents cost $17 while Opus percents cost about $30. So the price of 1% is taken only from clean steps, exactly +1% with at least 90% of the dollars on one family, and shown for the family you use most.
+- The limit charges model families differently per API dollar: in one measurement a percent of mostly Sonnet subagents cost $17 while Opus percents cost about $30. So the headline price of 1% is taken only from clean steps, exactly +1% with at least 90% of the dollars on one family, and shown for the family you use most. The per-model prices use every step: each is an equation "percent gained = Σ the model's dollars / its price of 1%", solved over all steps at once by least squares, with the standard error shown.
 - The pace is the weekly percent's own movement over the last day. The percent in progress is not counted, since it may have only just begun.
 - The meter books usage in bursts, so one step is off by about ±40% of its price; an average over k steps in a row by about ±40%/k. A further ±10% is systematic: API dollars are a ruler, and the limit may weigh cache reads, cache writes and output differently. A verdict says *clearly* only when the gap is larger than both.
 

@@ -101,6 +101,63 @@ export function spans(list: Step[], norm: number | null): Span[] {
   return out
 }
 
+function invert(A: number[][]): number[][] | null {
+  const n = A.length
+  const M = A.map((row, i) => [...row, ...row.map((_, j) => (i === j ? 1 : 0))])
+  for (let c = 0; c < n; c++) {
+    let p = c
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r]![c]!) > Math.abs(M[p]![c]!)) p = r
+    if (Math.abs(M[p]![c]!) < 1e-12) return null
+    ;[M[c], M[p]] = [M[p]!, M[c]!]
+    const row = M[c]!, d = row[c]!
+    for (let j = 0; j < 2 * n; j++) row[j]! /= d
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue
+      const other = M[r]!, k = other[c]!
+      for (let j = 0; j < 2 * n; j++) other[j]! -= k * row[j]!
+    }
+  }
+  return M.map(row => row.slice(n))
+}
+
+export type FamilyPrice = { family: string; perPct: number; rel: number; steps: number; usd: number }
+
+// The price of 1% for every model family from all steps, mixed ones included: each step is an
+// equation "percent gained = Σ family dollars / family price", solved together by least squares.
+// A family counts once it holds ≥10% of the dollars in at least two steps; a family whose
+// coefficient comes out negative (too little data) is dropped. The error is the coefficient's
+// standard error from the spread of the residuals.
+export function fitPrices(list: Step[]): FamilyPrice[] {
+  const share = (x: Step, f: string) => (x.cost.usd > 0 ? (x.cost.byFamily[f] ?? 0) / x.cost.usd : 0)
+  let fams: string[] = [...FAMILIES, 'other'].filter(f => list.filter(x => share(x, f) >= 0.1).length >= 2)
+  while (fams.length) {
+    const p = fams.length, n = list.length
+    if (n <= p) return []
+    const A = fams.map(() => Array<number>(p).fill(0)), bv = Array<number>(p).fill(0)
+    for (const x of list) {
+      const v = fams.map(f => x.cost.byFamily[f] ?? 0), y = x.b - x.a
+      for (let i = 0; i < p; i++) {
+        bv[i]! += v[i]! * y
+        for (let j = 0; j < p; j++) A[i]![j]! += v[i]! * v[j]!
+      }
+    }
+    const inv = invert(A)
+    if (!inv) return []
+    const beta = inv.map(row => row.reduce((s, a, j) => s + a * bv[j]!, 0))
+    const neg = beta.findIndex(b => b <= 0)
+    if (neg >= 0) { fams = fams.filter((_, i) => i !== neg); continue }
+    let rss = 0
+    for (const x of list) rss += (x.b - x.a - fams.reduce((s, f, i) => s + (x.cost.byFamily[f] ?? 0) * beta[i]!, 0)) ** 2
+    const s2 = rss / (n - p)
+    return fams.map((f, i) => ({
+      family: f, perPct: 1 / beta[i]!, rel: Math.sqrt(s2 * inv[i]![i]!) / beta[i]!,
+      steps: list.filter(x => share(x, f) >= 0.1).length,
+      usd: list.reduce((s, x) => s + (x.cost.byFamily[f] ?? 0), 0),
+    }))
+  }
+  return []
+}
+
 const money = (x: number | null | undefined) => x == null || !isFinite(x) ? '—' : '$' + (Math.abs(x) >= 100 ? x.toFixed(0) : x.toFixed(2))
 const mt = (x: number) => (x / 1e6).toFixed(2) + 'M'
 const pct = (x: number | null) => x == null ? '—' : (x >= 0 ? '+' : '') + (x * 100).toFixed(0) + '%'
@@ -167,6 +224,12 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
   if (fresh) S.push(`| 1% of the week${of} | **${money(fresh.perPct)}** (last ${fresh.k} clean) · ${pct(fresh.diff)} vs your earlier weeks (${money(norm)}) · ${fresh.verdict} |`)
   else S.push(`| 1% of the week${of} | not enough clean percents yet${norm ? `; earlier weeks ${money(norm)}` : ''} |`)
   S.push(`| Last percents | ${cur.slice(-3).map(x => `${x.a}→${x.b} ${money(x.cost.usd)}${mix(x, main)}`).join(' · ') || '—'} |`)
+  // every family's price, from all of this week's steps
+  const fitNow = fitPrices(cur)
+  const fitPrev = fitPrices([...steps(rows, ws - 2 * WEEK, ws - WEEK), ...steps(rows, ws - WEEK, ws)])
+  const base = fitNow.find(x => x.family === main) ?? fitNow[0]
+  const vs = (x: FamilyPrice, b?: FamilyPrice) => (b && x.family !== b.family ? ` (a dollar costs ×${(b.perPct / x.perPct).toFixed(1)} of ${title(b.family)}'s)` : '')
+  if (fitNow.length) S.push(`| 1% by model (whole week) | ${fitNow.map(x => `${title(x.family)} ${money(x.perPct)} ±${(x.rel * 100).toFixed(0)}%${vs(x, base)}`).join(' · ')} |`)
   if (lim.fiveHour != null) S.push(`| 5-hour window | ${lim.fiveHour}%${lim.fiveHour ? ` · ${money(fh.usd / lim.fiveHour)} per 1%` : ''}${lim.fiveHourResetsAt ? ` · resets ${clock(lim.fiveHourResetsAt)}` : ''} |`)
   S.push(`| Spent / left | ${money(week.usd)} this week · ≈${money(left)} left at ${money(perPct)} per 1%${of} |`)
   if (fresh) status += ` · ${money(fresh.perPct)}/1%`
@@ -177,6 +240,19 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
     const c = x.cost
     const note = x.b - x.a > 1 ? `jumped ${x.b - x.a}%` : x.family == null ? `mixed:${mix(x, null)}` : x.family !== main ? `${title(x.family)} only` : ''
     F.push(`| ${x.a}→${x.b} | ${clock(x.t1)} | ${((x.t1 - x.t0) / 60e3).toFixed(0)} min | ${money(c.usd)} | ${mt(c.cr)} · ${money(c.$cr)} | ${mt(c.cw)} · ${money(c.$cw)} | ${mt(c.out)} · ${money(c.$out)} | ${c.calls} | ${note} |`)
+  }
+  if (fitNow.length || fitPrev.length) {
+    const basePrev = fitPrev.find(x => x.family === main) ?? fitPrev[0]
+    F.push('', '## Price of 1% by model', '',
+      '| Model | $ per 1% this week | Error | Steps with it | Its dollars | Two earlier weeks | vs earlier | A dollar costs, vs main |', '|---|---|---|---|---|---|---|---|')
+    for (const x of fitNow) {
+      const pv = fitPrev.find(y => y.family === x.family)
+      const d = pv ? x.perPct / pv.perPct - 1 : null
+      F.push(`| ${title(x.family)} | **${money(x.perPct)}** | ±${(x.rel * 100).toFixed(0)}% | ${x.steps} | ${money(x.usd)} | ${pv ? `${money(pv.perPct)} ±${(pv.rel * 100).toFixed(0)}%` : '—'} | ${pct(d)} | ${base && x.family !== base.family ? `×${(base.perPct / x.perPct).toFixed(2)}` : '—'} |`)
+    }
+    for (const x of fitPrev) if (!fitNow.some(y => y.family === x.family))
+      F.push(`| ${title(x.family)} | too little this week | — | — | — | ${money(x.perPct)} ±${(x.rel * 100).toFixed(0)}% | — | ${basePrev && x.family !== basePrev.family ? `×${(basePrev.perPct / x.perPct).toFixed(2)} (earlier weeks)` : '—'} |`)
+    F.push('', 'Every step of the week, mixed ones too, is an equation "percent gained = Σ the model\'s dollars / its price of 1%", solved over all steps at once (least squares). A model is fitted once it holds ≥10% of the dollars in at least two steps. "A dollar costs" says how many times more limit one API dollar of that model takes than one of your main model.')
   }
   F.push('', '## Accuracy', '', `| Last clean | Span | $ per 1% | Error | vs earlier weeks | Verdict |`, '|---|---|---|---|---|---|')
   for (const s of sp) F.push(`| ${s.k} | ${s.a}→${s.b}%, ${when(s.t0)} – ${when(s.t1)} | ${money(s.perPct)} | ±${money(s.stat)} and ±10% | ${pct(s.diff)} | ${s.verdict} |`)

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { add, report, spans, steps, zero, type Row } from './pace'
+import { add, fitPrices, report, spans, steps, zero, type Row } from './pace'
 
 const H = 3600e3
 const T0 = Date.UTC(2026, 9, 24, 0, 0) // a week start
@@ -47,6 +47,25 @@ test('takes the pace from the meter over the last day, not from a percent just b
   const r = report(rows, { week: 12.9, weekResetsAt: RESET }, T0 + 48 * H)
   expect(r.short).toContain('+2% over the last day')
   expect(r.short).toContain('**12%**')
+})
+
+test('fits a price of 1% for each model from mixed steps', () => {
+  // Opus: $4 per 1%; Sonnet: $2 per 1% (its dollar takes twice the limit). Mixed steps of both.
+  const rows: Row[] = []
+  let t = T0, w = 0
+  const plan = [[10, 0], [5, 5], [0, 10], [8, 2], [2, 8], [10, 0], [4, 6], [6, 4]] // calls: [opus, sonnet]
+  const sonnet = (tt: number, ww: number): Row => [tt, 'claude-sonnet-5-5', 0, 10_000, 0, 1_000_000, ww, 1] // $0.20
+  for (const [o = 0, s = 0] of plan) {
+    for (let i = 0; i < o; i++) rows.push(call((t += 60e3), w))
+    for (let i = 0; i < s; i++) rows.push(sonnet((t += 60e3), w))
+    // opus calls are $0.40 each → o*0.4/4 %; sonnet $0.20 each → s*0.2/2 %; each plan row adds 1%
+    w += 1
+  }
+  rows.push(call((t += 60e3), w))
+  const fit = fitPrices(steps(rows, T0, RESET))
+  const opus = fit.find(x => x.family === 'opus'), son = fit.find(x => x.family === 'sonnet')
+  expect(Math.round((opus?.perPct ?? 0) * 100) / 100).toBe(4)
+  expect(Math.round((son?.perPct ?? 0) * 100) / 100).toBe(2)
 })
 
 test('calls a gap bigger than the error clearly above', () => {
