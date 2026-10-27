@@ -285,7 +285,7 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
   const leftNote = left ? ` · ≈${money(left)} of work left` : ''
   if (!known) base = null
   Q.push(!known ? '| **Will it last?** | no reading of the weekly limit yet: it comes with the first answer in a session where limit-pace runs |'
-    : !base ? `| **Will it last?** | week at ${w}%, not enough readings yet for a pace${leftNote} |`
+    : !base || hrsBase <= 1 ? `| **Will it last?** | week at ${w}%; the pace needs at least an hour of records${leftNote} |`
     : perHour <= 0 ? `| **Will it last?** | **yes**: week at ${w}%, the meter has not moved ${span}${leftNote} |`
     : lasts ? `| **Will it last?** | **yes**: week at ${w}%, +${w - base[1]}% ${span}; at this pace 100% in ${hrs.toFixed(0)} h, the week resets in ${resetIn.toFixed(0)} h${leftNote} |`
     : `| **Will it last?** | **no**: week at ${w}%, +${w - base[1]}% ${span}; at this pace 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before the reset${leftNote} |`)
