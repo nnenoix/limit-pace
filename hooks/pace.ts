@@ -272,22 +272,29 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
   const hrsBase = base ? (now - base[0]) / HOUR : 0, perHour = base && hrsBase > 1 ? (w - base[1]) / hrsBase : 0
   const span = base?.[0] === ws ? `over ${hrsBase.toFixed(0)} h since the reset` : hrsBase >= 23.5 ? 'over the last day' : `over ${hrsBase.toFixed(0)} h of records`
 
+  // the short answer: what 1% buys now, and whether the week lasts at this pace
+  const hrs = perHour > 0 ? (100 - w) / perHour : Infinity, lasts = hrs >= resetIn
+  const Q: string[] = ['| | |', '|---|---|']
+  Q.push(head
+    ? `| **1% of the week now** | **${money(head.perPct)}** of API work at Opus 5.5 prices (last ${head.k} percents) |`
+    : '| **1% of the week now** | not measured yet: it needs a few percents of use with limit-pace running |')
+  const leftNote = left ? ` · ≈${money(left)} of work left` : ''
+  Q.push(!base ? `| **Will it last?** | week at ${w}%, not enough readings yet for a pace${leftNote} |`
+    : perHour <= 0 ? `| **Will it last?** | **yes**: week at ${w}%, the meter has not moved ${span}${leftNote} |`
+    : lasts ? `| **Will it last?** | **yes**: week at ${w}%, +${w - base[1]}% ${span}; at this pace 100% in ${hrs.toFixed(0)} h, the week resets in ${resetIn.toFixed(0)} h${leftNote} |`
+    : `| **Will it last?** | **no**: week at ${w}%, +${w - base[1]}% ${span}; at this pace 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before the reset${leftNote} |`)
+  const status = `week ${w}%${head ? ` · ${money(head.perPct)}/1%` : ''}${base && perHour > 0 ? (lasts ? ' · lasts to reset' : ` · out ${when(now + hrs * HOUR)}`) : ''}`
+
   const T: string[] = ['| | |', '|---|---|']
-  let status = `week ${w}%`
-  if (perHour > 0 && base) {
-    const hrs = (100 - w) / perHour
-    T.push(hrs >= resetIn
-      ? `| **At this pace** | **enough**: +${w - base[1]}% ${span} (${perHour.toFixed(2)}%/h), 100% would take ${hrs.toFixed(0)} h, reset in ${resetIn.toFixed(0)} h |`
-      : `| **At this pace** | **runs out**: +${w - base[1]}% ${span} (${perHour.toFixed(2)}%/h), 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before reset |`)
-    status += hrs >= resetIn ? ' · enough to reset' : ` · out ${when(now + hrs * HOUR)}`
-  }
+  if (perHour > 0 && base) T.push(lasts
+    ? `| **At this pace** | **enough**: +${w - base[1]}% ${span} (${perHour.toFixed(2)}%/h), 100% would take ${hrs.toFixed(0)} h, reset in ${resetIn.toFixed(0)} h |`
+    : `| **At this pace** | **runs out**: +${w - base[1]}% ${span} (${perHour.toFixed(2)}%/h), 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before reset |`)
   T.push(`| Week | **${w}%** · resets ${when(reset)}, in ${resetIn.toFixed(0)} h |`)
   if (head) T.push(`| **1% of the week** | **${money(head.perPct)}** in Opus 5.5 dollars (last ${head.k} percents) · ${norm ? `**${times(head.diff)}** your earlier weeks (${money(norm)}) ±${(head.sigma * 100).toFixed(0)}% · ${head.verdict}` : 'no earlier weeks to compare yet'} |`)
   else T.push(`| 1% of the week | not enough clean percents yet${norm ? `; earlier weeks ${money(norm)}` : ''} |`)
   T.push(`| Last percents | ${cur.slice(-3).map(x => `${x.a}→${x.b} ${money(opus(x.cost, W) / (x.b - x.a))}${mix(x)}${x.partial ? ' (partial)' : ''}`).join(' · ') || '—'} |`)
   if (lim.fiveHour != null) T.push(`| 5-hour window | ${lim.fiveHour}%${lim.fiveHour ? ` · ${money(opus(fh, W) / lim.fiveHour)} per 1%` : ''}${lim.fiveHourResetsAt ? ` · resets ${clock(lim.fiveHourResetsAt)}` : ''} |`)
   T.push(`| Spent / left | ${money(opus(week, W))} this week · ≈${money(left)} left at ${money(perPct)} per 1% |`)
-  if (head) status += ` · ${money(head.perPct)}/1%${norm ? ` (${times(head.diff)})` : ''}`
 
   const fitNow = fitPrices(cur), fitPrev = fitPrices(earlier)
   const F: string[] = [...T, '', '## Every percent this week', '',
@@ -312,7 +319,7 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
     'The pace is how far the weekly percent itself moved over the last day, so breaks and sleep count; a percent just begun is not counted.',
     'Dollars count only the Claude Code sessions where limit-pace runs. Other computers, claude.ai chats, Cowork and Claude Code on the web move the percent but not these dollars: if they were busy, 1% looks cheaper here than it is.',
     'Prices are public API list prices per million tokens; cache writes at the one-hour rate on the main thread and the five-minute rate in subagents, the TTLs Claude Code uses.')
-  return { short: T.join('\n'), full: F.join('\n'), status }
+  return { short: Q.join('\n'), full: F.join('\n'), status }
 }
 
 // Keeps the store far under its 4 MiB: a call joins the session's last stored row when the model, the

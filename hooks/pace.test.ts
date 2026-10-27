@@ -77,7 +77,7 @@ test('takes the pace from the meter over the last day, not from a percent just b
   const rows: Row[] = [call(T0, 0), call(T0 + 24 * H, 10), call(T0 + 47 * H, 12), call(T0 + 48 * H, 12.9)]
   const r = report(rows, { week: 12.9, weekResetsAt: RESET }, T0 + 48 * H)
   expect(r.short).toContain('+2% over the last day')
-  expect(r.short).toContain('**12%**')
+  expect(r.short).toContain('week at 12%')
 })
 
 test('takes the pace from the first reading when recording began less than a day ago', () => {
@@ -85,7 +85,8 @@ test('takes the pace from the first reading when recording began less than a day
   const t = T0 + 72 * H
   const rows: Row[] = [call(t, 30), call(t + 10 * H, 34)]
   const r = report(rows, { week: 34, weekResetsAt: RESET }, t + 10 * H)
-  expect(r.short).toContain('+4% over 10 h of records (0.40%/h)')
+  expect(r.short).toContain('+4% over 10 h of records')
+  expect(r.full).toContain('(0.40%/h)')
 })
 
 test('fits a price of 1% for each model from mixed steps', () => {
@@ -125,11 +126,19 @@ test('merges calls into stored rows without moving a step or losing a dollar', (
   expect(b[0]!.cost.calls).toBe(10)
 })
 
-test('says whether the limit lasts at the current pace', () => {
+test('answers in two rows: what 1% buys now and whether the week lasts', () => {
+  // $4 a percent; 6% in the first hour of the week runs out long before the reset
   const rows = Array.from({ length: 61 }, (_, i) => call(T0 + i * 60e3, Math.floor(i / 10)))
-  const now = T0 + 61 * 60e3
-  const r = report(rows, { week: 6, fiveHour: 3, weekResetsAt: RESET }, now)
-  expect(r.short.split('\n')[2] ?? '').toContain('At this pace')
+  const r = report(rows, { week: 6, fiveHour: 3, weekResetsAt: RESET }, T0 + 61 * 60e3)
+  const lines = r.short.split('\n')
+  expect(lines.length).toBe(4)
+  expect(lines[2] ?? '').toContain('**$4.00** of API work')
+  expect(lines[3] ?? '').toContain('**no**: week at 6%')
   expect(r.full).toContain('## Accuracy')
-  expect(r.status).toContain('week 6%')
+  expect(r.status).toContain('week 6% · $4.00/1% · out')
+  // the same 6% spread over six days lasts
+  const slow = Array.from({ length: 61 }, (_, i) => call(T0 + i * 2.4 * H, Math.floor(i / 10)))
+  const r2 = report(slow, { week: 6, weekResetsAt: RESET }, T0 + 146 * H)
+  expect(r2.short).toContain('**yes**: week at 6%')
+  expect(r2.status).toContain('lasts to reset')
 })

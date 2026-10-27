@@ -14,21 +14,17 @@ Claude subscriptions show your five-hour and weekly limits only as percents. lim
 
 | Command | Shows |
 |---|---|
-| `/limit-pace` | The short table: pace, week, price of 1% now, the last percents, the five-hour window, spent and left |
-| `/limit-pace-full` | The short table, every percent of this week, the price of 1% for each model against earlier weeks, and the accuracy table |
+| `/limit-pace` | Two rows: what 1% of the week buys now in API work, and whether the week lasts at your pace |
+| `/limit-pace-full` | Everything behind it: pace, the comparison with your earlier weeks, every percent of this week, the price of 1% for each model, and the accuracy table |
 
-The status line also shows `week 38% · enough to reset · $22.18/1% (×1.00)`, updated after each turn.
+The status line also shows `week 38% · $22.18/1% · lasts to reset`, updated after each turn.
 
 Example of `/limit-pace`:
 
 | | |
 |---|---|
-| **At this pace** | **enough**: +7% over the last day (0.29%/h), 100% would take 213 h, reset in 76 h |
-| Week | **38%** · resets Sat 31 Oct, 03:00, in 76 h |
-| **1% of the week** | **$22.18** in Opus 5.5 dollars (last 10 percents) · **×1.00** your earlier weeks ($22.14) ±24% · within the usual spread |
-| Last percents | 35→36 $20.96 · 36→37 $28.69 · 37→38 $30.29 |
-| 5-hour window | 7% · $8.38 per 1% · resets 01:30 |
-| Spent / left | $916 this week · ≈$1375 left at $22.18 per 1% |
+| **1% of the week now** | **$22.18** of API work at Opus 5.5 prices (last 10 percents) |
+| **Will it last?** | **yes**: week at 38%, +7% over the last day; at this pace 100% in 213 h, the week resets in 75 h · ≈$1375 of work left |
 
 ## Install
 
