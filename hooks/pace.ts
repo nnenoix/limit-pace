@@ -251,6 +251,8 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
 
   // the weekly percent as a whole number: a percent just begun says nothing yet
   const w = Math.floor(lim.week ?? rows[rows.length - 1]?.[6] ?? 0)
+  // before the first answer of a session with limit-pace running there is no reading and no reset time
+  const known = lim.weekResetsAt != null && (lim.week != null || rows.some(r => r[6] != null))
   const week = zero(), fh = zero()
   const fhStart = lim.fiveHourResetsAt ? lim.fiveHourResetsAt - 5 * HOUR : now
   for (const r of rows) {
@@ -264,7 +266,7 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
   // reading from a day ago (installed since), from the first reading there is.
   const dayFrom = Math.max(ws, now - 24 * HOUR)
   let base: [number, number] | null = dayFrom === ws ? [ws, 0] : null
-  for (const r of rows) {
+  for (const r of known ? rows : []) {
     if (r[0] < ws || r[6] == null) continue
     if (r[0] <= dayFrom) base = [dayFrom, Math.floor(r[6])]
     else { base ??= [r[0], Math.floor(r[6])]; break }
@@ -279,11 +281,13 @@ export function report(rows: Row[], lim: Limits, now: number): Report {
     ? `| **1% of the week now** | **${money(head.perPct)}** of API work at Opus 5.5 prices (last ${head.k} percents) |`
     : '| **1% of the week now** | not measured yet: it needs a few percents of use with limit-pace running |')
   const leftNote = left ? ` · ≈${money(left)} of work left` : ''
-  Q.push(!base ? `| **Will it last?** | week at ${w}%, not enough readings yet for a pace${leftNote} |`
+  if (!known) base = null
+  Q.push(!known ? '| **Will it last?** | no reading of the weekly limit yet: it comes with the first answer in a session where limit-pace runs |'
+    : !base ? `| **Will it last?** | week at ${w}%, not enough readings yet for a pace${leftNote} |`
     : perHour <= 0 ? `| **Will it last?** | **yes**: week at ${w}%, the meter has not moved ${span}${leftNote} |`
     : lasts ? `| **Will it last?** | **yes**: week at ${w}%, +${w - base[1]}% ${span}; at this pace 100% in ${hrs.toFixed(0)} h, the week resets in ${resetIn.toFixed(0)} h${leftNote} |`
     : `| **Will it last?** | **no**: week at ${w}%, +${w - base[1]}% ${span}; at this pace 100% at ${when(now + hrs * HOUR)}, ${(resetIn - hrs).toFixed(0)} h before the reset${leftNote} |`)
-  const status = `week ${w}%${head ? ` · ${money(head.perPct)}/1%` : ''}${base && perHour > 0 ? (lasts ? ' · lasts to reset' : ` · out ${when(now + hrs * HOUR)}`) : ''}`
+  const status = !known ? 'limit-pace: waiting for the first reading' : `week ${w}%${head ? ` · ${money(head.perPct)}/1%` : ''}${base && perHour > 0 ? (lasts ? ' · lasts to reset' : ` · out ${when(now + hrs * HOUR)}`) : ''}`
 
   const T: string[] = ['| | |', '|---|---|']
   if (perHour > 0 && base) T.push(lasts

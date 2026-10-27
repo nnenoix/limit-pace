@@ -1,6 +1,6 @@
 {
   "name": "limit-pace",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Shows what 1% of your weekly Claude limit is worth in Opus 5.5 dollars against your earlier weeks, how sure that is, and whether the limit lasts until the reset at your current pace.",
   "author": { "name": "nnenoix" },
   "license": "MIT",

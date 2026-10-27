@@ -142,3 +142,10 @@ test('answers in two rows: what 1% buys now and whether the week lasts', () => {
   expect(r2.short).toContain('**yes**: week at 6%')
   expect(r2.status).toContain('lasts to reset')
 })
+
+test('says it has no reading yet instead of a week at 0%', () => {
+  const r = report([], {}, T0)
+  expect(r.short).toContain('no reading of the weekly limit yet')
+  expect(r.short).not.toContain('week at 0%')
+  expect(r.status).toBe('limit-pace: waiting for the first reading')
+})
