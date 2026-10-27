@@ -4,7 +4,7 @@
 // until the reset at the current pace.
 import type { EngineInterface, Register, TurnUsage } from 'claude-code'
 
-import { report, type Limits, type Row } from './pace'
+import { merge, report, type Limits, type Row } from './pace'
 
 const KEEP_MS = 16 * 24 * 3600e3 // this week and the two before it, for the baseline
 const FLUSH_MS = 30_000
@@ -21,11 +21,11 @@ function limitsOf(rl: readonly { kind: string; percentUsed: number; resetsAt?: s
   }
 }
 
-async function record($: EngineInterface, u: TurnUsage) {
+async function record($: EngineInterface, u: TurnUsage, sub: 0 | 1) {
   const lim = limitsOf((await $.session.usage()).rateLimits)
   const id = await $.session.id()
   const row: Row = [await $.clock.now(), u.model, u.input_tokens, u.output_tokens, u.cache_creation_input_tokens,
-    u.cache_read_input_tokens, lim.week ?? null, lim.fiveHour ?? null]
+    u.cache_read_input_tokens, lim.week ?? null, lim.fiveHour ?? null, sub]
   pending.set(id, [...(pending.get(id) ?? []), row])
   if (lim.weekResetsAt) await $.store.set('limits', { ...lim, at: row[0] })
 }
@@ -35,7 +35,7 @@ async function flush($: EngineInterface) {
     pending.delete(id)
     const key = `s:${id}`
     const old = ((await $.store.get(key)) as Row[] | undefined) ?? []
-    await $.store.set(key, [...old, ...rows])
+    await $.store.set(key, merge(old, rows))
   }
 }
 
@@ -77,10 +77,10 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // each model request of the turn, subagents' included: its usage arrives on the stop chunk
+  // each model request of the turn, subagents' included (agentId set): its usage arrives on the stop chunk
   on('turn.step', async function* ($, e, next) {
     for await (const c of next(e)) {
-      if (c.kind === 'stop' && c.usage) await record($, c.usage)
+      if (c.kind === 'stop' && c.usage) await record($, c.usage, e.agentId ? 1 : 0)
       yield c
     }
   })
