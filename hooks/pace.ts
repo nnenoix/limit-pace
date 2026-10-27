@@ -5,7 +5,8 @@
 // The two percents are what the response of that very call reported (null when it reported none).
 // subagent: 1 for a subagent's call (its cache writes live five minutes), 0 for the main thread's
 // (one hour); absent in rows recorded before 1.2.0. A stored row may be several calls merged: the last
-// field counts them.
+// field counts them. A row with an empty model is a reading alone: the percents Claude Code had once a
+// response was in (a call's own row carries the figures from before it).
 export type Row = [number, string, number, number, number, number, number | null, number | null, (0 | 1)?, number?]
 
 export type Limits = { weekResetsAt?: number; fiveHourResetsAt?: number; week?: number; fiveHour?: number }
@@ -47,6 +48,7 @@ export function price(model: string, context: number): number[] {
 }
 
 export function add(c: Cost, r: Row): Cost {
+  if (!r[1]) return c // a reading, no call
   const [, model, i, o, cw, cr, , , sub] = r
   const [pi = 0, po = 0, pw5 = 0, pw1 = 0, pr = 0] = price(model, i + cw + cr)
   // Claude Code caches the main thread for an hour and subagents for five minutes; rows from before

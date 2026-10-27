@@ -11,6 +11,8 @@ const FLUSH_MS = 30_000
 
 // rows of this process's sessions not yet written, by session id (a /clear starts a new id)
 const pending = new Map<string, Row[]>()
+// the last reading written per session, so an unchanged one is not written again
+const lastReading = new Map<string, string>()
 
 function limitsOf(rl: readonly { kind: string; percentUsed: number; resetsAt?: string }[]): Limits {
   const w = rl.find(r => r.kind === 'seven_day'), f = rl.find(r => r.kind === 'five_hour')
@@ -28,6 +30,21 @@ async function record($: EngineInterface, u: TurnUsage, sub: 0 | 1) {
     u.cache_read_input_tokens, lim.week ?? null, lim.fiveHour ?? null, sub]
   pending.set(id, [...(pending.get(id) ?? []), row])
   if (lim.weekResetsAt) await $.store.set('limits', { ...lim, at: row[0] })
+}
+
+// The percents once a response is in: session.measure brings them after each turn and whenever a window
+// moves a whole point. A call's own row carries the figures from before that call, and the first call of a
+// session none, so this reading is what places the step boundaries.
+async function reading($: EngineInterface, rl: readonly { kind: string; percentUsed: number; resetsAt?: string }[]) {
+  const lim = limitsOf(rl)
+  if (lim.week == null) return false
+  const id = await $.session.id(), key = `${lim.week}/${lim.fiveHour}`
+  if (lastReading.get(id) === key) return false
+  lastReading.set(id, key)
+  const row: Row = [await $.clock.now(), '', 0, 0, 0, 0, lim.week, lim.fiveHour ?? null]
+  pending.set(id, [...(pending.get(id) ?? []), row])
+  if (lim.weekResetsAt) await $.store.set('limits', { ...lim, at: row[0] })
+  return true
 }
 
 async function flush($: EngineInterface) {
@@ -83,6 +100,12 @@ export const register: Register = on => {
       if (c.kind === 'stop' && c.usage) await record($, c.usage, e.agentId ? 1 : 0)
       yield c
     }
+  })
+
+  on('session.measure', async ($, e, next) => {
+    const done = await next(e)
+    if (await reading($, e.rateLimits)) await refreshStatus($)
+    return done
   })
 
   on('turn.complete', async ($, e, next) => {

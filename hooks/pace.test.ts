@@ -149,3 +149,11 @@ test('says it has no reading yet instead of a week at 0%', () => {
   expect(r.short).not.toContain('week at 0%')
   expect(r.status).toBe('limit-pace: waiting for the first reading')
 })
+
+test('places a step boundary at a reading row and counts no call for it', () => {
+  // calls carry the figure from before them; the reading after the 10th call says 1%
+  const rows: Row[] = [...Array.from({ length: 10 }, (_, i) => call(T0 + i * 60e3, 0)), [T0 + 601e3, '', 0, 0, 0, 0, 1, 1],
+    ...Array.from({ length: 5 }, (_, i) => call(T0 + 660e3 + i * 60e3, 1)), [T0 + 1000e3, '', 0, 0, 0, 0, 2, 1]]
+  const s = steps(rows, T0, RESET)
+  expect(s.map(x => `${x.a}→${x.b}:${x.cost.calls}:${round(x.cost.usd)}`).join(' ')).toBe('0→1:10:4 1→2:5:2')
+})
