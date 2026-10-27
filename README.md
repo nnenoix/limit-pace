@@ -32,6 +32,14 @@ Example of `/limit-pace`:
 /plugin install limit-pace --marketplace nnenoix/limit-pace
 ```
 
+From a terminal, a script or an agent's shell (no slash commands there):
+
+```
+claude plugin install limit-pace --marketplace nnenoix/limit-pace
+```
+
+Add `--scope project` to install it for one project only. It starts in the next Claude Code session.
+
 Nothing to configure. Works on Windows, macOS and Linux with a Claude Pro or Max subscription and a Claude Code recent enough to run plugin hooks modules (tested on 2.1.309). The plugin starts recording when it is installed, so the price of 1% shows up after a few percents of use, and the comparison with earlier weeks after about a week. The percent that was in progress when you installed it is left out: part of it was used before recording began.
 
 ## How it works
